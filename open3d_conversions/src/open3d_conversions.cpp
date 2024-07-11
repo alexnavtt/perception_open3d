@@ -54,40 +54,70 @@ void open3dToRos(
   sensor_msgs::msg::PointCloud2 & ros_pc2)
 {
   sensor_msgs::PointCloud2Modifier modifier(ros_pc2);
+  modifier.clear();
+  modifier.setPointCloud2FieldsByString(1, "xyz");
+
+  ros_pc2.point_step = 12;
   if (pointcloud.HasColors()) {
-    modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
-  } else {
-    modifier.setPointCloud2FieldsByString(1, "xyz");
+    sensor_msgs::msg::PointField & rgb_field = ros_pc2.fields.emplace_back();
+    rgb_field.count = 1;
+    rgb_field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+    rgb_field.name = "rgb";
+    rgb_field.offset = ros_pc2.point_step;
+    ros_pc2.point_step += 4;
   }
-  modifier.resize(pointcloud.points_.size());
-  sensor_msgs::PointCloud2Iterator<float> ros_pc2_x(ros_pc2, "x");
-  sensor_msgs::PointCloud2Iterator<float> ros_pc2_y(ros_pc2, "y");
-  sensor_msgs::PointCloud2Iterator<float> ros_pc2_z(ros_pc2, "z");
-  if (pointcloud.HasColors()) {
-    sensor_msgs::PointCloud2Iterator<uint8_t> ros_pc2_r(ros_pc2, "r");
-    sensor_msgs::PointCloud2Iterator<uint8_t> ros_pc2_g(ros_pc2, "g");
-    sensor_msgs::PointCloud2Iterator<uint8_t> ros_pc2_b(ros_pc2, "b");
-    for (size_t i = 0; i < pointcloud.points_.size(); i++, ++ros_pc2_x,
-      ++ros_pc2_y, ++ros_pc2_z, ++ros_pc2_r, ++ros_pc2_g,
-      ++ros_pc2_b)
-    {
-      const Eigen::Vector3d & point = pointcloud.points_[i];
-      const Eigen::Vector3d & color = pointcloud.colors_[i];
-      *ros_pc2_x = point(0);
-      *ros_pc2_y = point(1);
-      *ros_pc2_z = point(2);
-      *ros_pc2_r = static_cast<int>(255 * color(0));
-      *ros_pc2_g = static_cast<int>(255 * color(1));
-      *ros_pc2_b = static_cast<int>(255 * color(2));
+
+  if (pointcloud.HasNormals()) {
+    sensor_msgs::msg::PointField & nx_field = ros_pc2.fields.emplace_back();
+    nx_field.count = 1;
+    nx_field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+    nx_field.name = "normal_x";
+    nx_field.offset = ros_pc2.point_step;
+    ros_pc2.point_step += 4;
+
+    sensor_msgs::msg::PointField & ny_field = ros_pc2.fields.emplace_back();
+    ny_field.count = 1;
+    ny_field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+    ny_field.name = "normal_y";
+    ny_field.offset = ros_pc2.point_step;
+    ros_pc2.point_step += 4;
+
+    sensor_msgs::msg::PointField & nz_field = ros_pc2.fields.emplace_back();
+    nz_field.count = 1;
+    nz_field.datatype = sensor_msgs::msg::PointField::FLOAT32;
+    nz_field.name = "normal_z";
+    nz_field.offset = ros_pc2.point_step;
+    ros_pc2.point_step += 4;
+  }
+
+  ros_pc2.height = 1;
+  ros_pc2.width = pointcloud.points_.size();
+  ros_pc2.row_step = ros_pc2.width * ros_pc2.point_step;
+  ros_pc2.is_bigendian = rcpputils::endian::native == rcpputils::endian::big;
+  ros_pc2.is_dense = true;
+  ros_pc2.data.resize(ros_pc2.row_step);
+
+  float * ros_it = reinterpret_cast<float *>(ros_pc2.data.data());  // Technically UB
+  for (std::size_t idx = 0; idx < pointcloud.points_.size(); ++idx) {
+    const Eigen::Vector3d & point_xyz = pointcloud.points_[idx];
+    *ros_it++ = static_cast<float>(point_xyz.x());
+    *ros_it++ = static_cast<float>(point_xyz.y());
+    *ros_it++ = static_cast<float>(point_xyz.z());
+
+    if (pointcloud.HasColors()) {
+      const Eigen::Vector3d & point_rgb = pointcloud.colors_[idx];
+      const uint8_t r = static_cast<uint8_t>(255 * point_rgb(0));
+      const uint8_t g = static_cast<uint8_t>(255 * point_rgb(1));
+      const uint8_t b = static_cast<uint8_t>(255 * point_rgb(2));
+      const uint32_t rgb = (rcpputils::endian::native == rcpputils::endian::big) ? (b << 24 | g << 16 | r << 8) : (r << 16 | g << 8 | b);
+      std::memcpy(ros_it++, &rgb, sizeof(float));
     }
-  } else {
-    for (size_t i = 0; i < pointcloud.points_.size();
-      i++, ++ros_pc2_x, ++ros_pc2_y, ++ros_pc2_z)
-    {
-      const Eigen::Vector3d & point = pointcloud.points_[i];
-      *ros_pc2_x = point(0);
-      *ros_pc2_y = point(1);
-      *ros_pc2_z = point(2);
+
+    if (pointcloud.HasNormals()) {
+      const Eigen::Vector3d & point_normal = pointcloud.normals_[idx];
+      *ros_it++ = static_cast<float>(point_normal.x());
+      *ros_it++ = static_cast<float>(point_normal.y());
+      *ros_it++ = static_cast<float>(point_normal.z());
     }
   }
 }
